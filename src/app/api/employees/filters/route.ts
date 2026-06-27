@@ -17,7 +17,7 @@ export async function GET() {
     ]);
 
     const unique = <T extends Record<string, unknown>>(arr: T[] | null, key: keyof T): string[] =>
-      [...new Set((arr ?? []).map((r) => String(r[key])).filter(Boolean))].sort();
+      Array.from(new Set((arr ?? []).map((r) => String(r[key])).filter(Boolean))).sort();
 
     return NextResponse.json({
       departments: unique(depts.data, "Department"),
