@@ -76,24 +76,29 @@ export async function GET() {
         .select("reference_id"),
     ]);
 
-    const hiddenSet = new Set((hiddenRows ?? []).map((r: { reference_id: string }) => r.reference_id));
+    // Build plain-object lookups (no Set/Map — ES5 target)
+    const hiddenLookup: Record<string, boolean> = {};
+    (hiddenRows ?? []).forEach((r: { reference_id: string }) => {
+      hiddenLookup[r.reference_id] = true;
+    });
 
-    const presentToday = new Set(
-      (todayDistinct ?? [])
-        .map((r) => r.ReferenceID)
-        .filter((id) => !hiddenSet.has(id))
-    ).size;
+    // Count distinct present employees, excluding hidden ones
+    const presentIds: Record<string, boolean> = {};
+    (todayDistinct ?? []).forEach((r) => {
+      if (!hiddenLookup[r.ReferenceID]) presentIds[r.ReferenceID] = true;
+    });
+    const presentToday = Object.keys(presentIds).length;
 
-    // Count lates: first log per person, if that first log is after 08:00
-    const firstLogPerUser = new Map<string, string>();
-    lateToday?.forEach((r) => {
-      if (hiddenSet.has(r.ReferenceID)) return;
-      const existing = firstLogPerUser.get(r.ReferenceID);
+    // Count lates: first log per person after 08:00, excluding hidden
+    const firstLogPerUser: Record<string, string> = {};
+    (lateToday ?? []).forEach((r) => {
+      if (hiddenLookup[r.ReferenceID]) return;
+      const existing = firstLogPerUser[r.ReferenceID];
       if (!existing || r.date_created < existing) {
-        firstLogPerUser.set(r.ReferenceID, r.date_created);
+        firstLogPerUser[r.ReferenceID] = r.date_created;
       }
     });
-    const lateCount = firstLogPerUser.size;
+    const lateCount = Object.keys(firstLogPerUser).length;
 
     return NextResponse.json({
       totalUsers:    totalUsers    ?? 0,

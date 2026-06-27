@@ -74,11 +74,17 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error;
 
-    // Annotate each employee with their hidden flag for the UI
-    const hiddenSet = new Set(hiddenIds);
-    const annotated = (data ?? []).map((emp: Record<string, unknown>) => ({
+    // Build a plain object lookup for O(1) hidden checks (no Set — ES5 target)
+    const hiddenLookup: Record<string, boolean> = {};
+    for (let i = 0; i < hiddenIds.length; i++) {
+      hiddenLookup[hiddenIds[i]] = true;
+    }
+
+    // Annotate each row — cast through unknown to satisfy strict typing
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    const annotated = rows.map((emp) => ({
       ...emp,
-      _hidden: hiddenSet.has(emp.ReferenceID as string),
+      _hidden: hiddenLookup[emp.ReferenceID as string] === true,
     }));
 
     return NextResponse.json({ data: annotated, total: count ?? 0, page, pageSize });
