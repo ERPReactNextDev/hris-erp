@@ -301,8 +301,9 @@ export default function TimesheetPage() {
     const run = async () => {
       setIsLoading(true);
       try {
-        const res = await fetch("/api/attendance");
-        setTaskLogs((await res.json()) || []);
+        const res = await fetch("/api/attendance?page=1&pageSize=10000");
+        const json = await res.json();
+        setTaskLogs(Array.isArray(json) ? json : (json.data || []));
       } catch (e) {
         console.error(e);
       } finally {

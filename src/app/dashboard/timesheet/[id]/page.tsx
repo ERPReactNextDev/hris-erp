@@ -247,8 +247,9 @@ export default function TimesheetDetailPage() {
     const run = async () => {
       setIsLoading(true);
       try {
-        const res  = await fetch("/api/attendance");
-        const data: TaskLog[] = await res.json();
+        const res  = await fetch("/api/attendance?page=1&pageSize=10000");
+        const json = await res.json();
+        const data: TaskLog[] = Array.isArray(json) ? json : (json.data || []);
         const mine = data.filter((l) => l.ReferenceID === userId);
         setTaskLogs(mine);
         if (mine.length > 0) setUserName(mine[0].Fullname || mine[0].ReferenceID || "");

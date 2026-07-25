@@ -29,9 +29,19 @@ import {
 
 // ─── Section divider ─────────────────────────────────────────────────────────
 type NavItem =
-  | { kind: "link";    label: string; href: string; icon: React.ElementType }
-  | { kind: "group";   label: string; icon: React.ElementType; children: { label: string; href: string }[] }
+  | { kind: "link";    label: string; href: string; icon: React.ElementType; built?: boolean }
+  | { kind: "group";   label: string; icon: React.ElementType; built?: boolean; children: { label: string; href: string; built?: boolean }[] }
   | { kind: "divider"; label: string };
+
+// Pages that actually exist — everything else is "coming soon"
+const BUILT = new Set([
+  "/dashboard",
+  "/dashboard/employees",
+  "/dashboard/attendance",
+  "/dashboard/timesheet",
+  "/dashboard/settings",
+  "/dashboard/profile",
+]);
 
 const NAV: NavItem[] = [
   {
@@ -194,7 +204,7 @@ const BOTTOM_NAV: NavItem[] = [
   { kind: "link", label: "Profile", href: "/dashboard/profile", icon: User },
 ];
 
-// ─── Group item (collapsible) ─────────────────────────────────────────────────
+// ─── Group item (collapsible with clickable header link) ──────────────────────
 function NavGroup({
   item,
   pathname,
@@ -206,32 +216,64 @@ function NavGroup({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const Icon = item.icon;
+  const primaryHref = item.children[0]?.href ?? "#";
+  const primaryBuilt = BUILT.has(primaryHref);
+  const isActive = item.children.some((c) => pathname.startsWith(c.href));
 
   return (
     <div>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/10 transition-colors text-left"
-      >
-        <Icon className="w-4 h-4 flex-shrink-0" />
-        <span className="flex-1 text-sm">{item.label}</span>
-        {open ? (
-          <ChevronDown className="w-3.5 h-3.5 text-white/50" />
+      <div className={`flex items-center rounded-lg transition-colors ${isActive ? "bg-white/10" : "hover:bg-white/10"}`}>
+        {primaryBuilt ? (
+          <Link
+            href={primaryHref}
+            className="flex items-center gap-3 px-3 py-2 flex-1 min-w-0"
+          >
+            <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? "text-white" : "text-white/70"}`} />
+            <span className={`text-sm truncate ${isActive ? "text-white font-medium" : "text-white/70"}`}>
+              {item.label}
+            </span>
+          </Link>
         ) : (
-          <ChevronRight className="w-3.5 h-3.5 text-white/50" />
+          <div className="flex items-center gap-3 px-3 py-2 flex-1 min-w-0 cursor-not-allowed">
+            <Icon className="w-4 h-4 flex-shrink-0 text-white/30" />
+            <span className="text-sm truncate text-white/30">{item.label}</span>
+          </div>
         )}
-      </button>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="px-2 py-2 text-white/40 hover:text-white transition-colors flex-shrink-0"
+          aria-label={open ? "Collapse" : "Expand"}
+        >
+          {open ? (
+            <ChevronDown className="w-3.5 h-3.5" />
+          ) : (
+            <ChevronRight className="w-3.5 h-3.5" />
+          )}
+        </button>
+      </div>
 
       {open && (
         <div className="ml-7 mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
           {item.children.map((child) => {
-            const isActive = pathname === child.href;
+            const isChildActive = pathname === child.href;
+            const childBuilt = BUILT.has(child.href);
+            if (!childBuilt) {
+              return (
+                <span
+                  key={child.href + child.label}
+                  className="block px-2 py-1.5 rounded-md text-sm text-white/25 cursor-not-allowed select-none"
+                  title="Coming soon"
+                >
+                  {child.label}
+                </span>
+              );
+            }
             return (
               <Link
                 key={child.href + child.label}
                 href={child.href}
                 className={`block px-2 py-1.5 rounded-md text-sm transition-colors ${
-                  isActive
+                  isChildActive
                     ? "bg-white/20 text-white font-medium"
                     : "text-white/70 hover:text-white hover:bg-white/10"
                 }`}
@@ -301,6 +343,19 @@ export default function DashboardLayout({
               if (item.kind === "link") {
                 const Icon = item.icon;
                 const isActive = pathname === item.href;
+                const isBuilt  = BUILT.has(item.href);
+                if (!isBuilt) {
+                  return (
+                    <div
+                      key={item.href}
+                      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/25 cursor-not-allowed select-none"
+                      title="Coming soon"
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      {item.label}
+                    </div>
+                  );
+                }
                 return (
                   <Link
                     key={item.href}
