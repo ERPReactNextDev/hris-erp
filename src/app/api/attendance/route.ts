@@ -160,15 +160,21 @@ export async function GET(request: NextRequest) {
     if (search) {
       const q = search.toLowerCase();
       const nameMatches = finalLogs.filter(
-        (log) => log.Fullname && log.Fullname.toLowerCase().includes(q)
+        (log) => log.Fullname && String(log.Fullname).toLowerCase().includes(q)
       );
       // Merge: keep rows already matched by SQL OR matched by name
       const merged: typeof finalLogs = [];
-      const seenIds: Record<number, boolean> = {};
-      finalLogs.forEach((log) => { if (!seenIds[log.id]) { seenIds[log.id] = true; merged.push(log); } });
-      nameMatches.forEach((log) => { if (!seenIds[log.id]) { seenIds[log.id] = true; merged.push(log); } });
+      const seenIds: Record<string, boolean> = {};
+      finalLogs.forEach((log) => {
+        const k = String(log.id ?? "");
+        if (!seenIds[k]) { seenIds[k] = true; merged.push(log); }
+      });
+      nameMatches.forEach((log) => {
+        const k = String(log.id ?? "");
+        if (!seenIds[k]) { seenIds[k] = true; merged.push(log); }
+      });
       finalLogs  = merged;
-      finalTotal = count ?? 0; // total count is approximate when name-searching
+      finalTotal = count ?? 0;
     }
 
     return NextResponse.json({
