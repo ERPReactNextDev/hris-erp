@@ -166,11 +166,11 @@ export async function GET(request: NextRequest) {
       const merged: typeof finalLogs = [];
       const seenIds: Record<string, boolean> = {};
       finalLogs.forEach((log) => {
-        const k = String(log.id ?? "");
+        const k = String((log as Record<string, unknown>).id ?? "");
         if (!seenIds[k]) { seenIds[k] = true; merged.push(log); }
       });
       nameMatches.forEach((log) => {
-        const k = String(log.id ?? "");
+        const k = String((log as Record<string, unknown>).id ?? "");
         if (!seenIds[k]) { seenIds[k] = true; merged.push(log); }
       });
       finalLogs  = merged;
