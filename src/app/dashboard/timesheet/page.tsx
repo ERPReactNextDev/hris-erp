@@ -16,10 +16,17 @@ import {
   Check,
   Download,
   Search,
+  Building2,
 } from "lucide-react";
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
-const formatDate = (date: Date) => date.toISOString().split("T")[0];
+// Use local date (not UTC) to avoid timezone shift for PH (UTC+8)
+const formatDate = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 const addDays = (date: Date, days: number) => {
   const result = new Date(date);
@@ -265,6 +272,8 @@ export default function TimesheetPage() {
 
   // Search + pagination
   const [search, setSearch] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [companyOptions, setCompanyOptions] = useState<string[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
@@ -273,6 +282,14 @@ export default function TimesheetPage() {
     fetch("/api/holidays")
       .then((r) => r.json())
       .then((data: Holiday[]) => setHolidays(data.map((h) => h.date)))
+      .catch(() => {});
+  }, []);
+
+  // ── Load company options (only companies with attendance records) ─────────
+  useEffect(() => {
+    fetch("/api/attendance", { method: "POST" })
+      .then((r) => r.json())
+      .then((d) => setCompanyOptions(d.companies ?? []))
       .catch(() => {});
   }, []);
 
@@ -296,12 +313,24 @@ export default function TimesheetPage() {
   };
   useEffect(() => { fetchCutoffs(); }, []);
 
-  // ── Fetch attendance ────────────────────────────────────────────────────────
+  // ── Fetch attendance — scoped to the visible date range ───────────────────
   useEffect(() => {
     const run = async () => {
       setIsLoading(true);
       try {
-        const res = await fetch("/api/attendance?page=1&pageSize=10000");
+        // Determine the date range for the current view
+        const rangeDates = getDates();
+        const rangeStart = formatDate(rangeDates[0]);
+        const rangeEnd   = formatDate(rangeDates[rangeDates.length - 1]);
+
+        const params = new URLSearchParams({
+          page:      "1",
+          pageSize:  "50000",
+          startDate: rangeStart,
+          endDate:   rangeEnd,
+        });
+
+        const res  = await fetch(`/api/attendance?${params}`);
         const json = await res.json();
         setTaskLogs(Array.isArray(json) ? json : (json.data || []));
       } catch (e) {
@@ -311,7 +340,8 @@ export default function TimesheetPage() {
       }
     };
     run();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, currentDate, startDate, endDate, activeCutoff]);
 
   const handleSelectCutoff = (cutoff: PayrollCutoff) => {
     setActiveCutoff(cutoff);
@@ -387,19 +417,26 @@ export default function TimesheetPage() {
   const allUsers = Array.from(new Set(taskLogs.map((l) => l.ReferenceID))).map(
     (refId) => {
       const log = taskLogs.find((l) => l.ReferenceID === refId);
-      return { id: refId, name: log?.Fullname || refId || "Unknown" };
+      return {
+        id:         refId,
+        name:       log?.Fullname   || refId || "Unknown",
+        department: log?.Department || "",
+        company:    log?.Company    || "",
+      };
     }
   );
 
   // ── Filtered + paginated ────────────────────────────────────────────────────
-  const filteredUsers = allUsers.filter((u) =>
-    u.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredUsers = allUsers.filter((u) => {
+    const matchesSearch  = u.name.toLowerCase().includes(search.toLowerCase());
+    const matchesCompany = !companyFilter || u.company === companyFilter;
+    return matchesSearch && matchesCompany;
+  });
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
   const pagedUsers = filteredUsers.slice((page - 1) * pageSize, page * pageSize);
 
   // Reset to page 1 when search changes
-  useEffect(() => { setPage(1); }, [search]);
+  useEffect(() => { setPage(1); }, [search, companyFilter]);
 
   // ── Date range label ────────────────────────────────────────────────────────
   const getDateRangeText = () => {
@@ -422,7 +459,7 @@ export default function TimesheetPage() {
     const ws = wb.addWorksheet("Timesheet");
 
     // Header row
-    const headerRow = ["Employee", ...dates.map((d) => formatDate(d)), "Total Hours"];
+    const headerRow = ["Employee", "Department", "Company", ...dates.map((d) => formatDate(d)), "Total Hours"];
     ws.addRow(headerRow);
     const hRow = ws.getRow(1);
     hRow.font = { bold: true };
@@ -436,7 +473,7 @@ export default function TimesheetPage() {
     // Data rows — export ALL filtered users (not just current page)
     filteredUsers.forEach((user) => {
       const userLogMap = userLogs.get(user.id);
-      const rowData: (string | number)[] = [user.name];
+      const rowData: (string | number)[] = [user.name, user.department, user.company];
 
       dates.forEach((date) => {
         const dateKey = formatDate(date);
@@ -462,9 +499,11 @@ export default function TimesheetPage() {
     });
 
     // Column widths
-    ws.getColumn(1).width = 28;
-    for (let i = 2; i <= dates.length + 1; i++) ws.getColumn(i).width = 13;
-    ws.getColumn(dates.length + 2).width = 14;
+    ws.getColumn(1).width = 28; // Employee
+    ws.getColumn(2).width = 22; // Department
+    ws.getColumn(3).width = 26; // Company
+    for (let i = 4; i <= dates.length + 3; i++) ws.getColumn(i).width = 13;
+    ws.getColumn(dates.length + 4).width = 14;
 
     // Download
     const buf = await wb.xlsx.writeBuffer();
@@ -581,16 +620,36 @@ export default function TimesheetPage() {
             )}
           </div>
 
-          {/* Row 3: search + export */}
+          {/* Row 3: search + company filter + export */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                placeholder="Search employee…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Input
+                  placeholder="Search employee…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <select
+                value={companyFilter}
+                onChange={(e) => setCompanyFilter(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-black bg-white min-w-[160px] focus:outline-none focus:ring-2 focus:ring-gray-300"
+              >
+                <option value="">All Companies</option>
+                {companyOptions.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              {(search || companyFilter) && (
+                <button
+                  onClick={() => { setSearch(""); setCompanyFilter(""); }}
+                  className="text-sm text-gray-400 hover:text-black flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" /> Clear
+                </button>
+              )}
             </div>
             <Button variant="outline" size="sm" onClick={handleExport} disabled={isLoading}>
               <Download className="w-4 h-4 mr-2" />
@@ -668,7 +727,7 @@ export default function TimesheetPage() {
                           className="hover:bg-gray-50 cursor-pointer"
                           onClick={() => router.push(`/dashboard/timesheet/${user.id}`)}
                         >
-                          <td className="border border-gray-300 px-6 py-4 font-medium text-black sticky left-0 bg-white z-10">
+                          <td className="border border-gray-300 px-6 py-4 font-medium text-black sticky left-0 bg-white z-10 uppercase">
                             {user.name}
                           </td>
                           {dates.map((date, dateIdx) => {

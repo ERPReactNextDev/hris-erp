@@ -28,11 +28,13 @@ export async function GET() {
     const depts    = await supabase.from("users").select("Department").not("Department", "is", null);
     const statuses = await supabase.from("users").select("Status").not("Status", "is", null);
     const roles    = await supabase.from("users").select("Role").not("Role", "is", null);
+    const companies = await supabase.from("users").select("Company").not("Company", "is", null);
 
     return NextResponse.json({
-      departments: uniqueValues(depts.data,    "Department"),
-      statuses:    uniqueValues(statuses.data, "Status"),
-      roles:       uniqueValues(roles.data,    "Role"),
+      departments: uniqueValues(depts.data,     "Department"),
+      statuses:    uniqueValues(statuses.data,  "Status"),
+      roles:       uniqueValues(roles.data,     "Role"),
+      companies:   uniqueValues(companies.data, "Company"),
     });
   } catch (error) {
     console.error("GET /api/employees/filters:", error);

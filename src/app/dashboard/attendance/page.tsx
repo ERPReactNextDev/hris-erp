@@ -89,14 +89,16 @@ export default function AttendancePage() {
 
   const [typeOptions,   setTypeOptions]   = useState<string[]>([]);
   const [statusOptions, setStatusOptions] = useState<string[]>([]);
+  const [companyOptions, setCompanyOptions] = useState<string[]>([]);
 
-  const [search,       setSearch]       = useState("");
-  const [typeFilter,   setTypeFilter]   = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [startDate,    setStartDate]    = useState("");
-  const [endDate,      setEndDate]      = useState("");
-  const [page,         setPage]         = useState(1);
-  const [pageSize,     setPageSize]     = useState(25);
+  const [search,        setSearch]        = useState("");
+  const [typeFilter,    setTypeFilter]    = useState("");
+  const [statusFilter,  setStatusFilter]  = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [startDate,     setStartDate]     = useState("");
+  const [endDate,       setEndDate]       = useState("");
+  const [page,          setPage]          = useState(1);
+  const [pageSize,      setPageSize]      = useState(25);
 
   // Photo lightbox
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -109,7 +111,11 @@ export default function AttendancePage() {
   useEffect(() => {
     fetch("/api/attendance", { method: "POST" })
       .then((r) => r.json())
-      .then((d) => { setTypeOptions(d.types ?? []); setStatusOptions(d.statuses ?? []); })
+      .then((d) => {
+        setTypeOptions(d.types      ?? []);
+        setStatusOptions(d.statuses ?? []);
+        setCompanyOptions(d.companies ?? []);
+      })
       .catch(() => {});
   }, []);
 
@@ -119,11 +125,12 @@ export default function AttendancePage() {
     try {
       const params = new URLSearchParams({
         page: String(page), pageSize: String(pageSize),
-        ...(search       && { search }),
-        ...(typeFilter   && { type: typeFilter }),
-        ...(statusFilter && { status: statusFilter }),
-        ...(startDate    && { startDate }),
-        ...(endDate      && { endDate }),
+        ...(search        && { search }),
+        ...(typeFilter    && { type: typeFilter }),
+        ...(statusFilter  && { status: statusFilter }),
+        ...(companyFilter && { company: companyFilter }),
+        ...(startDate     && { startDate }),
+        ...(endDate       && { endDate }),
       });
       const res: AttendanceResponse = await fetch(`/api/attendance?${params}`).then((r) => r.json());
       setLogs(res.data ?? []);
@@ -133,10 +140,10 @@ export default function AttendancePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, search, typeFilter, statusFilter, startDate, endDate]);
+  }, [page, pageSize, search, typeFilter, statusFilter, companyFilter, startDate, endDate]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
-  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, startDate, endDate, pageSize]);
+  useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, companyFilter, startDate, endDate, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -159,11 +166,12 @@ export default function AttendancePage() {
   const handleExport = async () => {
     const params = new URLSearchParams({
       page: "1", pageSize: "10000",
-      ...(search       && { search }),
-      ...(typeFilter   && { type: typeFilter }),
-      ...(statusFilter && { status: statusFilter }),
-      ...(startDate    && { startDate }),
-      ...(endDate      && { endDate }),
+      ...(search        && { search }),
+      ...(typeFilter    && { type: typeFilter }),
+      ...(statusFilter  && { status: statusFilter }),
+      ...(companyFilter && { company: companyFilter }),
+      ...(startDate     && { startDate }),
+      ...(endDate       && { endDate }),
     });
     const res: AttendanceResponse = await fetch(`/api/attendance?${params}`).then((r) => r.json());
     const all = res.data ?? [];
@@ -171,25 +179,29 @@ export default function AttendancePage() {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Attendance");
     ws.columns = [
-      { header: "Date & Time",        key: "date",      width: 22 },
-      { header: "Fullname",           key: "fullname",  width: 26 },
-      { header: "Email",              key: "email",     width: 30 },
-      { header: "Type",               key: "type",      width: 16 },
-      { header: "Status",             key: "status",    width: 16 },
-      { header: "Remarks",            key: "remarks",   width: 30 },
-      { header: "Location",           key: "location",  width: 40 },
-      { header: "Site Visit Account", key: "siteVisit", width: 30 },
+      { header: "Date & Time",        key: "date",       width: 22 },
+      { header: "Fullname",           key: "fullname",   width: 26 },
+      { header: "Department",         key: "department", width: 22 },
+      { header: "Company",            key: "company",    width: 26 },
+      { header: "Email",              key: "email",      width: 30 },
+      { header: "Type",               key: "type",       width: 16 },
+      { header: "Status",             key: "status",     width: 16 },
+      { header: "Remarks",            key: "remarks",    width: 30 },
+      { header: "Location",           key: "location",   width: 40 },
+      { header: "Site Visit Account", key: "siteVisit",  width: 30 },
     ];
     all.forEach((log) => {
       ws.addRow({
-        date:      log.date_created ? new Date(log.date_created as string).toLocaleString("en-PH") : "-",
-        fullname:  log.Fullname  || "-",
-        email:     log.Email     || "-",
-        type:      log.Type      || "-",
-        status:    log.Status    || "-",
-        remarks:   log.Remarks   || "-",
-        location:  log.DisplayLocation || log.Location || "-",
-        siteVisit: log.SiteVisitAccount || "-",
+        date:       log.date_created ? new Date(log.date_created as string).toLocaleString("en-PH") : "-",
+        fullname:   log.Fullname    || "-",
+        department: log.Department  || "-",
+        company:    log.Company     || "-",
+        email:      log.Email       || "-",
+        type:       log.Type        || "-",
+        status:     log.Status      || "-",
+        remarks:    log.Remarks     || "-",
+        location:   log.DisplayLocation || log.Location || "-",
+        siteVisit:  log.SiteVisitAccount || "-",
       });
     });
     ws.getRow(1).font = { bold: true };
@@ -223,7 +235,7 @@ export default function AttendancePage() {
     return "bg-gray-100 text-gray-700";
   };
 
-  const hasFilters = search || typeFilter || statusFilter || startDate || endDate;
+  const hasFilters = search || typeFilter || statusFilter || companyFilter || startDate || endDate;
 
   return (
     <>
@@ -246,6 +258,14 @@ export default function AttendancePage() {
                   ({total.toLocaleString()})
                 </span>
               )}
+              {companyFilter && (
+                <span className="ml-2 inline-flex items-center gap-1 text-xs font-medium bg-gray-900 text-white px-2 py-0.5 rounded-full">
+                  {companyFilter}
+                  <button onClick={() => setCompanyFilter("")} className="hover:opacity-70 ml-0.5">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
             </CardTitle>
             <Button variant="outline" size="sm" onClick={handleExport} disabled={isLoading}>
               <Download className="w-4 h-4 mr-2" />Export Excel
@@ -258,8 +278,9 @@ export default function AttendancePage() {
               <Input placeholder="Search name, email, remarks…" value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
-            <SelectFilter value={typeFilter}   onChange={setTypeFilter}   options={typeOptions}   placeholder="All Types" />
-            <SelectFilter value={statusFilter} onChange={setStatusFilter} options={statusOptions} placeholder="All Statuses" />
+            <SelectFilter value={typeFilter}   onChange={setTypeFilter}   options={typeOptions}    placeholder="All Types" />
+            <SelectFilter value={statusFilter} onChange={setStatusFilter} options={statusOptions}  placeholder="All Statuses" />
+            <SelectFilter value={companyFilter} onChange={setCompanyFilter} options={companyOptions} placeholder="All Companies" />
             <div className="flex items-center gap-2">
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-36" />
               <span className="text-gray-400 text-sm">–</span>
@@ -267,7 +288,7 @@ export default function AttendancePage() {
             </div>
             {hasFilters && (
               <Button variant="ghost" size="sm" className="text-gray-400 hover:text-black"
-                onClick={() => { setSearch(""); setTypeFilter(""); setStatusFilter(""); setStartDate(""); setEndDate(""); }}>
+                onClick={() => { setSearch(""); setTypeFilter(""); setStatusFilter(""); setCompanyFilter(""); setStartDate(""); setEndDate(""); }}>
                 Clear
               </Button>
             )}
@@ -285,6 +306,8 @@ export default function AttendancePage() {
                 <TableRow className="bg-gray-50 hover:bg-gray-50 sticky top-0 z-10">
                   <TableHead className="text-gray-500 font-medium px-4 py-3 whitespace-nowrap">Date & Time</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Employee</TableHead>
+                  <TableHead className="text-gray-500 font-medium px-4 py-3">Department</TableHead>
+                  <TableHead className="text-gray-500 font-medium px-4 py-3">Company</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Type</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Status</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Remarks</TableHead>
@@ -308,6 +331,8 @@ export default function AttendancePage() {
                       <p className="text-sm font-medium text-black leading-tight uppercase">{log.Fullname || "—"}</p>
                       <p className="text-xs text-gray-400">{log.Email || ""}</p>
                     </TableCell>
+                    <TableCell className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{log.Department || "—"}</TableCell>
+                    <TableCell className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{log.Company || "—"}</TableCell>
                     <TableCell className="px-4 py-3">
                       {log.Type ? (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-900 text-white">

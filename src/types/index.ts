@@ -83,4 +83,7 @@ export interface TaskLog {
   PhotoURL?: string;
   Fullname?: string;
   DisplayLocation?: string;
+  // Joined from users table
+  Department?: string;
+  Company?: string;
 }

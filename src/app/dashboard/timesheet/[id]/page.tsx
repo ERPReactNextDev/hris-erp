@@ -18,7 +18,13 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const formatDate = (date: Date) => date.toISOString().split("T")[0];
+// Use local date to avoid UTC timezone shift (PH is UTC+8)
+const formatDate = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 const getTime = (d: string | Date | undefined) => {
   if (!d) return "--:--";

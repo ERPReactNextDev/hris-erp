@@ -16,18 +16,35 @@ function uniqueVals(rows: Array<Record<string, unknown>> | null, key: string): s
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const search     = searchParams.get("search")?.trim()     ?? "";
-    const type       = searchParams.get("type")?.trim()       ?? "";
-    const status     = searchParams.get("status")?.trim()     ?? "";
-    const startDate  = searchParams.get("startDate")?.trim()  ?? "";
-    const endDate    = searchParams.get("endDate")?.trim()    ?? "";
-    const page       = Math.max(1, parseInt(searchParams.get("page")     ?? "1"));
-    const pageSize   = Math.min(250, Math.max(1, parseInt(searchParams.get("pageSize") ?? "25")));
+    const search    = searchParams.get("search")?.trim()    ?? "";
+    const type      = searchParams.get("type")?.trim()      ?? "";
+    const status    = searchParams.get("status")?.trim()    ?? "";
+    const company   = searchParams.get("company")?.trim()   ?? "";
+    const startDate = searchParams.get("startDate")?.trim() ?? "";
+    const endDate   = searchParams.get("endDate")?.trim()   ?? "";
+    const page      = Math.max(1, parseInt(searchParams.get("page")     ?? "1"));
+    // Allow up to 50 000 rows for bulk internal fetches (timesheet, exports)
+    const pageSize  = Math.min(50000, Math.max(1, parseInt(searchParams.get("pageSize") ?? "25")));
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
+
+    // ── Resolve company → ReferenceIDs (server-side) ──────────────────────
+    let companyRefIds: string[] | null = null;
+    if (company) {
+      const { data: companyUsers } = await supabase
+        .from("users")
+        .select("ReferenceID")
+        .ilike("Company", company);  // case-insensitive exact match
+      companyRefIds = (companyUsers ?? [])
+        .map((u: { ReferenceID: string }) => u.ReferenceID)
+        .filter(Boolean);
+      if (companyRefIds.length === 0) {
+        return NextResponse.json({ data: [], total: 0, page, pageSize });
+      }
+    }
 
     // ── Build filtered query ──────────────────────────────────────────────
     let query = supabase
@@ -39,8 +56,8 @@ export async function GET(request: NextRequest) {
     if (status)    query = query.eq("Status", status);
     if (startDate) query = query.gte("date_created", startDate + "T00:00:00");
     if (endDate)   query = query.lte("date_created", endDate   + "T23:59:59");
+    if (companyRefIds) query = query.in("ReferenceID", companyRefIds);
     if (search) {
-      // Search by ReferenceID or Email (server-side); name search done after join
       query = query.or(
         `ReferenceID.ilike.%${search}%,Email.ilike.%${search}%,Remarks.ilike.%${search}%,Location.ilike.%${search}%`
       );
@@ -49,43 +66,87 @@ export async function GET(request: NextRequest) {
     // Paginate
     const from = (page - 1) * pageSize;
     const to   = from + pageSize - 1;
-    const { data: taskLogs, count, error: taskLogError } = await query.range(from, to);
+
+    // For large bulk fetches, Supabase PostgREST caps at 1000 rows per request.
+    // Fetch in 1000-row chunks and merge when pageSize > 1000.
+    let taskLogs: Record<string, unknown>[] = [];
+    let count: number | null = null;
+    let taskLogError = null;
+
+    if (pageSize <= 1000) {
+      const result = await query.range(from, to);
+      taskLogs = (result.data ?? []) as Record<string, unknown>[];
+      count = result.count;
+      taskLogError = result.error;
+    } else {
+      // First get the total count
+      const countResult = await query.range(0, 0);
+      count = countResult.count;
+      taskLogError = countResult.error;
+
+      if (!taskLogError) {
+        // Fetch all rows in 1000-row chunks within the requested range
+        const chunkSize = 1000;
+        let chunkFrom = from;
+        while (chunkFrom <= to) {
+          const chunkTo = Math.min(chunkFrom + chunkSize - 1, to);
+          const chunk = await query.range(chunkFrom, chunkTo);
+          if (chunk.error) { taskLogError = chunk.error; break; }
+          taskLogs = taskLogs.concat((chunk.data ?? []) as Record<string, unknown>[]);
+          if ((chunk.data ?? []).length < chunkSize) break;
+          chunkFrom += chunkSize;
+        }
+      }
+    }
 
     if (taskLogError) throw taskLogError;
-    if (!taskLogs)    return NextResponse.json({ data: [], total: 0, page, pageSize });
+    if (!taskLogs || taskLogs.length === 0) return NextResponse.json({ data: [], total: count ?? 0, page, pageSize });
 
-    // ── Resolve names for this page's unique ReferenceIDs ────────────────
+    // ── Resolve names + dept + company for this page's unique ReferenceIDs ──
+    type LogRow = Record<string, unknown>;
+    const logRows = taskLogs as LogRow[];
+
     const refIds: string[] = [];
     const refIdSeen: Record<string, boolean> = {};
-    taskLogs.forEach((log) => {
-      if (log.ReferenceID && !refIdSeen[log.ReferenceID]) {
-        refIdSeen[log.ReferenceID] = true;
-        refIds.push(log.ReferenceID);
+    logRows.forEach((log) => {
+      const refId = String(log.ReferenceID ?? "");
+      if (refId && !refIdSeen[refId]) {
+        refIdSeen[refId] = true;
+        refIds.push(refId);
       }
     });
 
-    const userLookup: Record<string, string> = {};
+    interface UserInfo { fullname: string; department: string; company: string; }
+    const userLookup: Record<string, UserInfo> = {};
     if (refIds.length > 0) {
       const { data: users } = await supabase
         .from("users")
-        .select("ReferenceID, Firstname, Lastname")
+        .select("ReferenceID, Firstname, Lastname, Department, Company")
         .in("ReferenceID", refIds);
 
       (users ?? []).forEach((user) => {
         const fullName = ((user.Firstname || "") + " " + (user.Lastname || "")).trim();
-        userLookup[user.ReferenceID] = fullName || user.ReferenceID;
+        userLookup[user.ReferenceID] = {
+          fullname:   fullName || user.ReferenceID,
+          department: user.Department || "",
+          company:    user.Company    || "",
+        };
       });
     }
 
     // ── Process rows ──────────────────────────────────────────────────────
-    const processedLogs = taskLogs.map((log) => {
-      let displayLocation = log.Location;
+    const processedLogs = logRows.map((log) => {
+      const refId = String(log.ReferenceID ?? "");
+      let displayLocation = log.Location as string | undefined;
       if (!displayLocation && log.Latitude && log.Longitude) {
-        displayLocation = log.Latitude + ", " + log.Longitude;
+        displayLocation = String(log.Latitude) + ", " + String(log.Longitude);
       }
+      const info = userLookup[refId];
       return {
         ...log,
-        Fullname:        userLookup[log.ReferenceID] || log.ReferenceID,
+        Fullname:        info ? info.fullname   : (refId || ""),
+        Department:      info ? info.department : "",
+        Company:         info ? info.company    : "",
         DisplayLocation: displayLocation,
       };
     });
@@ -123,7 +184,8 @@ export async function GET(request: NextRequest) {
 }
 
 // ── Filters endpoint (/api/attendance — POST) ─────────────────────────────────
-// Returns distinct Type and Status values for dropdowns
+// Returns distinct Type, Status, and Company values — only for companies that
+// actually have attendance records (joined from users via tasklog ReferenceIDs)
 export async function POST() {
   try {
     const supabase = createClient(
@@ -131,18 +193,43 @@ export async function POST() {
       process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY!
     );
 
-    const [types, statuses] = await Promise.all([
-      supabase.from("tasklog").select("Type").not("Type",   "is", null),
+    // Get distinct ReferenceIDs that have at least one tasklog entry
+    const { data: refRows } = await supabase
+      .from("tasklog")
+      .select("ReferenceID")
+      .not("ReferenceID", "is", null);
+
+    // Collect unique ReferenceIDs
+    const refSeen: Record<string, boolean> = {};
+    const refIds: string[] = [];
+    (refRows ?? []).forEach((r: { ReferenceID: string }) => {
+      if (r.ReferenceID && !refSeen[r.ReferenceID]) {
+        refSeen[r.ReferenceID] = true;
+        refIds.push(r.ReferenceID);
+      }
+    });
+
+    // Fetch company + type/status in parallel
+    const [types, statuses, companyRows] = await Promise.all([
+      supabase.from("tasklog").select("Type").not("Type", "is", null),
       supabase.from("tasklog").select("Status").not("Status", "is", null),
+      refIds.length > 0
+        ? supabase
+            .from("users")
+            .select("Company")
+            .in("ReferenceID", refIds)
+            .not("Company", "is", null)
+        : Promise.resolve({ data: [] }),
     ]);
 
     return NextResponse.json({
-      types:    uniqueVals(types.data    as Array<Record<string, unknown>>,    "Type"),
-      statuses: uniqueVals(statuses.data as Array<Record<string, unknown>>,    "Status"),
+      types:     uniqueVals(types.data     as Array<Record<string, unknown>>, "Type"),
+      statuses:  uniqueVals(statuses.data  as Array<Record<string, unknown>>, "Status"),
+      companies: uniqueVals(companyRows.data as Array<Record<string, unknown>>, "Company"),
     });
   } catch (error) {
     console.error("POST /api/attendance (meta):", error);
-    return NextResponse.json({ types: [], statuses: [] });
+    return NextResponse.json({ types: [], statuses: [], companies: [] });
   }
 }
 
