@@ -57,6 +57,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
     }
 
+    // ── Access restriction ────────────────────────────────────────────────
+    // Only allow login for:
+    //   - Department: Human Resources
+    //   - Department: Accounting
+    //   - ReferenceID: XLGR-GLOBAL-ERP-000000 (developer account)
+    const ALLOWED_DEPARTMENTS = ["Human Resources", "Accounting"];
+    const DEVELOPER_REF_ID    = "XLGR-GLOBAL-ERP-000000";
+
+    const dept  = (user.Department ?? "").trim();
+    const refId = (user.ReferenceID ?? "").trim();
+    const isDeveloper       = refId === DEVELOPER_REF_ID;
+    const isAllowedDept     = ALLOWED_DEPARTMENTS.some(
+      (d) => d.toLowerCase() === dept.toLowerCase()
+    );
+
+    if (!isDeveloper && !isAllowedDept) {
+      return NextResponse.json(
+        { error: "Access denied. You do not have permission to access this system." },
+        { status: 403 }
+      );
+    }
+    // ─────────────────────────────────────────────────────────────────────
+
     // Return user without password field
     const { Password, ...userWithoutPassword } = user;
     return NextResponse.json({ user: userWithoutPassword });

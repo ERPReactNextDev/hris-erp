@@ -22,6 +22,10 @@ export async function GET(request: NextRequest) {
     const company   = searchParams.get("company")?.trim()   ?? "";
     const startDate = searchParams.get("startDate")?.trim() ?? "";
     const endDate   = searchParams.get("endDate")?.trim()   ?? "";
+    // Comma-separated departments to restrict results (permission-based)
+    const deptFilterParam     = searchParams.get("deptFilter")?.trim()      ?? "";
+    // Comma-separated companies to exclude (permission-based)
+    const excludeCompaniesParam = searchParams.get("excludeCompanies")?.trim() ?? "";
     const page      = Math.max(1, parseInt(searchParams.get("page")     ?? "1"));
     // Allow up to 50 000 rows for bulk internal fetches (timesheet, exports)
     const pageSize  = Math.min(50000, Math.max(1, parseInt(searchParams.get("pageSize") ?? "25")));
@@ -46,17 +50,75 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── Resolve excluded companies → ReferenceIDs to block ───────────────
+    let excludedRefIds: string[] | null = null;
+    if (excludeCompaniesParam) {
+      const excCompanies = excludeCompaniesParam.split(",").map((s) => s.trim()).filter(Boolean);
+      if (excCompanies.length > 0) {
+        const excIds: string[] = [];
+        for (let i = 0; i < excCompanies.length; i++) {
+          const { data: excUsers } = await supabase
+            .from("users")
+            .select("ReferenceID")
+            .ilike("Company", excCompanies[i]);
+          (excUsers ?? []).forEach((u: { ReferenceID: string }) => {
+            if (u.ReferenceID) excIds.push(u.ReferenceID);
+          });
+        }
+        excludedRefIds = excIds;
+      }
+    }
+
+    // ── Resolve dept permission filter → ReferenceIDs ─────────────────────
+    let deptRefIds: string[] | null = null;
+    if (deptFilterParam) {
+      const depts = deptFilterParam.split(",").map((s) => s.trim()).filter(Boolean);
+      if (depts.length > 0) {
+        // Fetch ReferenceIDs for each allowed department
+        const allDeptIds: string[] = [];
+        for (let i = 0; i < depts.length; i++) {
+          const { data: deptUsers } = await supabase
+            .from("users")
+            .select("ReferenceID")
+            .ilike("Department", depts[i]);
+          (deptUsers ?? []).forEach((u: { ReferenceID: string }) => {
+            if (u.ReferenceID) allDeptIds.push(u.ReferenceID);
+          });
+        }
+        deptRefIds = allDeptIds;
+        if (deptRefIds.length === 0) {
+          return NextResponse.json({ data: [], total: 0, page, pageSize });
+        }
+      }
+    }
+
     // ── Build filtered query ──────────────────────────────────────────────
     let query = supabase
       .from("tasklog")
       .select("*", { count: "exact" })
       .order("date_created", { ascending: false });
 
-    if (type)      query = query.eq("Type",   type);
-    if (status)    query = query.eq("Status", status);
-    if (startDate) query = query.gte("date_created", startDate + "T00:00:00");
-    if (endDate)   query = query.lte("date_created", endDate   + "T23:59:59");
+    if (type)          query = query.eq("Type",   type);
+    if (status)        query = query.eq("Status", status);
+    if (startDate)     query = query.gte("date_created", startDate + "T00:00:00");
+    if (endDate)       query = query.lte("date_created", endDate   + "T23:59:59");
     if (companyRefIds) query = query.in("ReferenceID", companyRefIds);
+
+    // Exclude specific companies' employees
+    if (excludedRefIds && excludedRefIds.length > 0) {
+      query = query.not("ReferenceID", "in", `(${excludedRefIds.map((id) => `"${id}"`).join(",")})`);
+    }
+
+    // Apply permission-based dept filter — intersect with company filter if both active
+    if (deptRefIds) {
+      const allowed = companyRefIds
+        ? deptRefIds.filter((id) => (companyRefIds as string[]).includes(id))
+        : deptRefIds;
+      if (allowed.length === 0) {
+        return NextResponse.json({ data: [], total: 0, page, pageSize });
+      }
+      query = query.in("ReferenceID", allowed);
+    }
     if (search) {
       query = query.or(
         `ReferenceID.ilike.%${search}%,Email.ilike.%${search}%,Remarks.ilike.%${search}%,Location.ilike.%${search}%`

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
+import { usePermissions } from "@/context/PermissionsContext";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -209,16 +210,22 @@ function NavGroup({
   item,
   pathname,
   defaultOpen,
+  canSeeSubModule,
 }: {
   item: Extract<NavItem, { kind: "group" }>;
   pathname: string;
   defaultOpen: boolean;
+  canSeeSubModule: (module: string, label: string) => boolean;
 }) {
+  const visibleChildren = item.children.filter((c) => canSeeSubModule(item.label, c.label));
   const [open, setOpen] = useState(defaultOpen);
   const Icon = item.icon;
-  const primaryHref = item.children[0]?.href ?? "#";
+  const primaryHref = visibleChildren[0]?.href ?? item.children[0]?.href ?? "#";
   const primaryBuilt = BUILT.has(primaryHref);
-  const isActive = item.children.some((c) => pathname.startsWith(c.href));
+  const isActive = visibleChildren.some((c) => pathname.startsWith(c.href));
+
+  // Don't render the group at all if no children are visible
+  if (visibleChildren.length === 0) return null;
 
   return (
     <div>
@@ -254,7 +261,7 @@ function NavGroup({
 
       {open && (
         <div className="ml-7 mt-0.5 space-y-0.5 border-l border-white/10 pl-3">
-          {item.children.map((child) => {
+          {visibleChildren.map((child) => {
             const isChildActive = pathname === child.href;
             const childBuilt = BUILT.has(child.href);
             if (!childBuilt) {
@@ -295,6 +302,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { user, logout } = useAuth();
+  const { canSeeModule, canSeeSubModule } = usePermissions();
   const pathname = usePathname();
   const router   = useRouter();
 
@@ -327,61 +335,84 @@ export default function DashboardLayout({
 
           {/* Main nav — scrollable */}
           <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
-            {NAV.map((item, idx) => {
-              // ── Section divider ──────────────────────────────────────────
-              if (item.kind === "divider") {
-                return (
-                  <div key={`divider-${idx}`} className="pt-4 pb-1 px-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-white/30">
-                      {item.label}
-                    </p>
-                  </div>
-                );
+            {(() => {
+              // Pre-filter: mark which items are visible so we can hide orphan dividers
+              const visibleFlags: boolean[] = NAV.map((item) => {
+                if (item.kind === "divider") return false; // determined below
+                if (item.kind === "link")    return canSeeModule(item.label);
+                // group: visible only if module is allowed AND at least one child passes
+                if (!canSeeModule(item.label)) return false;
+                return item.children.some((c) => canSeeSubModule(item.label, c.label));
+              });
+              // A divider is visible only if at least one following item (before next divider) is visible
+              for (let i = 0; i < NAV.length; i++) {
+                if (NAV[i].kind !== "divider") continue;
+                let hasVisible = false;
+                for (let j = i + 1; j < NAV.length; j++) {
+                  if (NAV[j].kind === "divider") break;
+                  if (visibleFlags[j]) { hasVisible = true; break; }
+                }
+                visibleFlags[i] = hasVisible;
               }
 
-              // ── Single link ──────────────────────────────────────────────
-              if (item.kind === "link") {
-                const Icon = item.icon;
-                const isActive = pathname === item.href;
-                const isBuilt  = BUILT.has(item.href);
-                if (!isBuilt) {
+              return NAV.map((item, idx) => {
+                if (!visibleFlags[idx]) return null;
+
+                // ── Section divider ────────────────────────────────────────
+                if (item.kind === "divider") {
                   return (
-                    <div
-                      key={item.href}
-                      className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/25 cursor-not-allowed select-none"
-                      title="Coming soon"
-                    >
-                      <Icon className="w-4 h-4 flex-shrink-0" />
-                      {item.label}
+                    <div key={`divider-${idx}`} className="pt-4 pb-1 px-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/30">
+                        {item.label}
+                      </p>
                     </div>
                   );
                 }
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
-                      isActive
-                        ? "bg-white/20 text-white font-medium"
-                        : "text-white/70 hover:text-white hover:bg-white/10"
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 flex-shrink-0" />
-                    {item.label}
-                  </Link>
-                );
-              }
 
-              // ── Collapsible group ────────────────────────────────────────
-              return (
-                <NavGroup
-                  key={item.label}
-                  item={item}
-                  pathname={pathname}
-                  defaultOpen={groupDefaultOpen(item)}
-                />
-              );
-            })}
+                // ── Single link ──────────────────────────────────────────
+                if (item.kind === "link") {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.href;
+                  const isBuilt  = BUILT.has(item.href);
+                  if (!isBuilt) {
+                    return (
+                      <div
+                        key={item.href}
+                        className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-white/25 cursor-not-allowed select-none"
+                        title="Coming soon"
+                      >
+                        <Icon className="w-4 h-4 flex-shrink-0" />
+                        {item.label}
+                      </div>
+                    );
+                  }
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${
+                        isActive
+                          ? "bg-white/20 text-white font-medium"
+                          : "text-white/70 hover:text-white hover:bg-white/10"
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      {item.label}
+                    </Link>
+                  );
+                }
+
+                // ── Collapsible group ──────────────────────────────────────
+                return (
+                  <NavGroup
+                    key={item.label}
+                    item={item}
+                    pathname={pathname}
+                    defaultOpen={groupDefaultOpen(item)}
+                    canSeeSubModule={canSeeSubModule}
+                  />
+                );              });
+            })()}
           </nav>
 
           {/* Bottom: profile + logout */}

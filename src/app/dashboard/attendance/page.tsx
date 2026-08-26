@@ -13,6 +13,7 @@ import {
   Download, Search, ChevronLeft, ChevronRight,
   Trash2, X, ZoomIn,
 } from "lucide-react";
+import { usePermissions } from "@/context/PermissionsContext";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250];
 
@@ -107,7 +108,9 @@ export default function AttendancePage() {
   const [deleteTarget, setDeleteTarget] = useState<TaskLog | null>(null);
   const [deleting,     setDeleting]     = useState(false);
 
-  // ── Load filter options once ────────────────────────────────────────────────
+  const { rule } = usePermissions();
+  const permDeptFilter      = rule.attendanceDeptFilter;
+  const permExcludeCompanies = rule.excludedCompanies;
   useEffect(() => {
     fetch("/api/attendance", { method: "POST" })
       .then((r) => r.json())
@@ -132,6 +135,13 @@ export default function AttendancePage() {
         ...(startDate     && { startDate }),
         ...(endDate       && { endDate }),
       });
+      // Apply permission-based dept filter (passed as comma-separated departments)
+      if (permDeptFilter && permDeptFilter.length > 0) {
+        params.set("deptFilter", permDeptFilter.join(","));
+      }
+      if (permExcludeCompanies && permExcludeCompanies.length > 0) {
+        params.set("excludeCompanies", permExcludeCompanies.join(","));
+      }
       const res: AttendanceResponse = await fetch(`/api/attendance?${params}`).then((r) => r.json());
       setLogs(res.data ?? []);
       setTotal(res.total ?? 0);
@@ -140,7 +150,7 @@ export default function AttendancePage() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, search, typeFilter, statusFilter, companyFilter, startDate, endDate]);
+  }, [page, pageSize, search, typeFilter, statusFilter, companyFilter, startDate, endDate, permDeptFilter, permExcludeCompanies]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
   useEffect(() => { setPage(1); }, [search, typeFilter, statusFilter, companyFilter, startDate, endDate, pageSize]);
@@ -173,6 +183,12 @@ export default function AttendancePage() {
       ...(startDate     && { startDate }),
       ...(endDate       && { endDate }),
     });
+    if (permDeptFilter && permDeptFilter.length > 0) {
+      params.set("deptFilter", permDeptFilter.join(","));
+    }
+    if (permExcludeCompanies && permExcludeCompanies.length > 0) {
+      params.set("excludeCompanies", permExcludeCompanies.join(","));
+    }
     const res: AttendanceResponse = await fetch(`/api/attendance?${params}`).then((r) => r.json());
     const all = res.data ?? [];
     const ExcelJS = (await import("exceljs")).default;
