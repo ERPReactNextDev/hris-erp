@@ -5,20 +5,12 @@ import { useAuth } from "@/context/AuthContext";
 
 // ─── Permission rule shape ────────────────────────────────────────────────────
 export interface PermissionRule {
-  /** Allowed top-level nav group/link labels. Null = show everything. */
-  allowedModules: string[] | null;
-  /** Allowed child link labels per module. Null = show all children. */
-  allowedSubModules: Record<string, string[]> | null;
-  /**
-   * Departments to pre-filter attendance/timesheet views.
-   * Null = no filter (see all).
-   */
+  allowedModules:       string[] | null;
+  allowedSubModules:    Record<string, string[]> | null;
   attendanceDeptFilter: string[] | null;
-  /**
-   * Companies to EXCLUDE from attendance/timesheet views.
-   * Null = no exclusion.
-   */
-  excludedCompanies: string[] | null;
+  excludedCompanies:    string[] | null;
+  /** Whether the user can delete attendance records */
+  canDeleteAttendance:  boolean;
 }
 
 // ─── Rules table ─────────────────────────────────────────────────────────────
@@ -34,6 +26,7 @@ const RULES: Record<string, PermissionRule> = {
     },
     attendanceDeptFilter: ["Sales", "Engineering"],
     excludedCompanies:    ["Buildchem Solutions"],
+    canDeleteAttendance:  false,
   },
 
   // Default — full access (fallback for any unmatched combination)
@@ -42,6 +35,7 @@ const RULES: Record<string, PermissionRule> = {
     allowedSubModules:    null,
     attendanceDeptFilter: null,
     excludedCompanies:    null,
+    canDeleteAttendance:  true,
   },
 };
 

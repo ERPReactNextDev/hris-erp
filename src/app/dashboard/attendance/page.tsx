@@ -109,8 +109,9 @@ export default function AttendancePage() {
   const [deleting,     setDeleting]     = useState(false);
 
   const { rule } = usePermissions();
-  const permDeptFilter      = rule.attendanceDeptFilter;
+  const permDeptFilter       = rule.attendanceDeptFilter;
   const permExcludeCompanies = rule.excludedCompanies;
+  const canDelete            = rule.canDeleteAttendance;
   useEffect(() => {
     fetch("/api/attendance", { method: "POST" })
       .then((r) => r.json())
@@ -329,7 +330,7 @@ export default function AttendancePage() {
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Remarks</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Location</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Photo</TableHead>
-                  <TableHead className="text-gray-500 font-medium px-4 py-3 w-16"></TableHead>
+                  {canDelete && <TableHead className="text-gray-500 font-medium px-4 py-3 w-16"></TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -363,10 +364,10 @@ export default function AttendancePage() {
                         </span>
                       ) : "—"}
                     </TableCell>
-                    <TableCell className="px-4 py-3 text-sm text-gray-700 max-w-[180px] truncate">
+                    <TableCell className="px-4 py-3 text-sm text-gray-700 min-w-[180px] max-w-[280px] whitespace-normal break-words">
                       {log.Remarks || "—"}
                     </TableCell>
-                    <TableCell className="px-4 py-3 text-sm text-gray-700 max-w-[200px] truncate">
+                    <TableCell className="px-4 py-3 text-sm text-gray-700 min-w-[200px] max-w-[320px] whitespace-normal break-words">
                       {log.DisplayLocation || log.Location || "—"}
                     </TableCell>
 
@@ -392,6 +393,7 @@ export default function AttendancePage() {
                     </TableCell>
 
                     {/* Delete button */}
+                    {canDelete && (
                     <TableCell className="px-4 py-3">
                       <button
                         onClick={() => setDeleteTarget(log)}
@@ -401,6 +403,7 @@ export default function AttendancePage() {
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
