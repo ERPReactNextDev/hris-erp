@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Download, Search, ChevronLeft, ChevronRight,
-  Trash2, X, ZoomIn,
+  Trash2, X, ZoomIn, MapPin, Loader2,
 } from "lucide-react";
 import { usePermissions } from "@/context/PermissionsContext";
 
@@ -82,6 +82,117 @@ function ConfirmDialog({
   );
 }
 
+// ─── Map modal ────────────────────────────────────────────────────────────────
+interface MapEntry {
+  lat: string;
+  lng: string;
+  label?: string; // employee name for the title
+}
+
+function MapModal({ entry, onClose }: { entry: MapEntry; onClose: () => void }) {
+  const [address, setAddress] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(true);
+
+  const lat = parseFloat(entry.lat);
+  const lng = parseFloat(entry.lng);
+  const isValid = !isNaN(lat) && !isNaN(lng);
+
+  // Reverse-geocode using Nominatim (OpenStreetMap, free, no key needed)
+  useEffect(() => {
+    if (!isValid) { setResolving(false); return; }
+    setResolving(true);
+    fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+      { headers: { "Accept-Language": "en" } },
+    )
+      .then((r) => r.json())
+      .then((d) => setAddress(d.display_name ?? null))
+      .catch(() => setAddress(null))
+      .finally(() => setResolving(false));
+  }, [lat, lng, isValid]);
+
+  // OpenStreetMap tile embed via iframe (no API key needed)
+  const zoom = 16;
+  const mapSrc = isValid
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.005},${lng + 0.005},${lat + 0.005}&layer=mapnik&marker=${lat},${lng}`
+    : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <MapPin className="w-5 h-5 text-gray-700" />
+            <span className="font-semibold text-black text-sm">
+              {entry.label ? `Location — ${entry.label}` : "Location"}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-black transition-colors rounded p-1"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Coordinates + address */}
+        <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
+          <p className="text-xs text-gray-500 font-mono">
+            {lat.toFixed(6)}, {lng.toFixed(6)}
+          </p>
+          {resolving ? (
+            <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" /> Resolving address…
+            </p>
+          ) : address ? (
+            <p className="text-xs text-gray-700 mt-1 leading-snug">{address}</p>
+          ) : (
+            <p className="text-xs text-gray-400 mt-1">Address unavailable</p>
+          )}
+        </div>
+
+        {/* Map iframe */}
+        <div className="relative w-full" style={{ height: 340 }}>
+          {isValid && mapSrc ? (
+            <iframe
+              src={mapSrc}
+              title="Map"
+              className="w-full h-full border-0"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+              No valid coordinates.
+            </div>
+          )}
+        </div>
+
+        {/* Open in maps link */}
+        {isValid && (
+          <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
+            <a
+              href={`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=${zoom}/${lat}/${lng}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Open in OpenStreetMap ↗
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function AttendancePage() {
   const [logs,         setLogs]         = useState<TaskLog[]>([]);
@@ -103,6 +214,9 @@ export default function AttendancePage() {
 
   // Photo lightbox
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  // Map modal
+  const [mapEntry, setMapEntry] = useState<MapEntry | null>(null);
 
   // Delete confirm
   const [deleteTarget, setDeleteTarget] = useState<TaskLog | null>(null);
@@ -257,6 +371,7 @@ export default function AttendancePage() {
   return (
     <>
       {lightboxUrl && <PhotoLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+      {mapEntry && <MapModal entry={mapEntry} onClose={() => setMapEntry(null)} />}
       {deleteTarget && (
         <ConfirmDialog
           onConfirm={handleDelete}
@@ -292,7 +407,7 @@ export default function AttendancePage() {
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative flex-1 min-w-[220px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input placeholder="Search name, email, remarks…" value={search}
+              <Input placeholder="Search name, dept, company, remarks, location…" value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
             <SelectFilter value={typeFilter}   onChange={setTypeFilter}   options={typeOptions}    placeholder="All Types" />
@@ -329,6 +444,8 @@ export default function AttendancePage() {
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Status</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Remarks</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Location</TableHead>
+                  <TableHead className="text-gray-500 font-medium px-4 py-3">Site Visit Account</TableHead>
+                  <TableHead className="text-gray-500 font-medium px-4 py-3">Map</TableHead>
                   <TableHead className="text-gray-500 font-medium px-4 py-3">Photo</TableHead>
                   {canDelete && <TableHead className="text-gray-500 font-medium px-4 py-3 w-16"></TableHead>}
                 </TableRow>
@@ -369,6 +486,33 @@ export default function AttendancePage() {
                     </TableCell>
                     <TableCell className="px-4 py-3 text-sm text-gray-700 min-w-[200px] max-w-[320px] whitespace-normal break-words">
                       {log.DisplayLocation || log.Location || "—"}
+                    </TableCell>
+
+                    {/* Site Visit Account */}
+                    <TableCell className="px-4 py-3 text-sm text-gray-700 max-w-[180px] whitespace-normal break-words uppercase">
+                      {log.SiteVisitAccount || "—"}
+                    </TableCell>
+
+                    {/* Map button — shows only when lat/lng are present */}
+                    <TableCell className="px-4 py-3">
+                      {log.Latitude && log.Longitude ? (
+                        <button
+                          onClick={() =>
+                            setMapEntry({
+                              lat: log.Latitude!,
+                              lng: log.Longitude!,
+                              label: log.Fullname,
+                            })
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-900 text-white hover:bg-gray-700 transition-colors"
+                          title={`Lat: ${log.Latitude}, Lng: ${log.Longitude}`}
+                        >
+                          <MapPin className="w-3 h-3" />
+                          Map
+                        </button>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
 
                     {/* Photo cell — click to open lightbox */}

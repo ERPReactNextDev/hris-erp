@@ -92,6 +92,20 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── Resolve search term against users table (name/dept/company) ──────
+    let searchRefIds: string[] | null = null;
+    if (search) {
+      const { data: matchedUsers } = await supabase
+        .from("users")
+        .select("ReferenceID")
+        .or(
+          `Firstname.ilike.%${search}%,Lastname.ilike.%${search}%,Department.ilike.%${search}%,Company.ilike.%${search}%,Email.ilike.%${search}%`
+        );
+      searchRefIds = (matchedUsers ?? [])
+        .map((u: { ReferenceID: string }) => u.ReferenceID)
+        .filter(Boolean);
+    }
+
     // ── Build filtered query ──────────────────────────────────────────────
     let query = supabase
       .from("tasklog")
@@ -120,9 +134,18 @@ export async function GET(request: NextRequest) {
       query = query.in("ReferenceID", allowed);
     }
     if (search) {
-      query = query.or(
-        `ReferenceID.ilike.%${search}%,Email.ilike.%${search}%,Remarks.ilike.%${search}%,Location.ilike.%${search}%`
-      );
+      // Direct tasklog field matches (remarks, location, sitevisit, email in tasklog)
+      const directOr = `Email.ilike.%${search}%,Remarks.ilike.%${search}%,Location.ilike.%${search}%,SiteVisitAccount.ilike.%${search}%`;
+
+      if (searchRefIds && searchRefIds.length > 0) {
+        // Combine: rows whose ReferenceID matches a user search OR direct field matches
+        // Build an OR of refid.in + direct fields. PostgREST supports this via or()
+        const refIdList = searchRefIds.map((id) => `"${id}"`).join(",");
+        query = query.or(`ReferenceID.in.(${refIdList}),${directOr}`);
+      } else {
+        // No user matches — search only direct tasklog fields
+        query = query.or(directOr);
+      }
     }
 
     // Paginate
@@ -213,35 +236,9 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // If searching by name, filter after name resolution and re-slice
-    // (name search can't be done in SQL — return the page with a note)
-    // For full name search we do a secondary pass only on the current page
-    let finalLogs = processedLogs;
-    let finalTotal = count ?? 0;
-
-    if (search) {
-      const q = search.toLowerCase();
-      const nameMatches = finalLogs.filter(
-        (log) => log.Fullname && String(log.Fullname).toLowerCase().includes(q)
-      );
-      // Merge: keep rows already matched by SQL OR matched by name
-      const merged: typeof finalLogs = [];
-      const seenIds: Record<string, boolean> = {};
-      finalLogs.forEach((log) => {
-        const k = String((log as Record<string, unknown>).id ?? "");
-        if (!seenIds[k]) { seenIds[k] = true; merged.push(log); }
-      });
-      nameMatches.forEach((log) => {
-        const k = String((log as Record<string, unknown>).id ?? "");
-        if (!seenIds[k]) { seenIds[k] = true; merged.push(log); }
-      });
-      finalLogs  = merged;
-      finalTotal = count ?? 0;
-    }
-
     return NextResponse.json({
-      data:     finalLogs,
-      total:    finalTotal,
+      data:     processedLogs,
+      total:    count ?? 0,
       page,
       pageSize,
     });

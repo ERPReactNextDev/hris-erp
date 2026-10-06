@@ -24,7 +24,7 @@ const RULES: Record<string, PermissionRule> = {
       "Attendance":     ["Daily Logs"],
       "Administration": ["Settings"],
     },
-    attendanceDeptFilter: ["Sales", "Engineering"],
+    attendanceDeptFilter: null,
     excludedCompanies:    ["Buildchem Solutions"],
     canDeleteAttendance:  false,
   },
