@@ -61,8 +61,9 @@ export async function POST(request: Request) {
     // Only allow login for:
     //   - Department: Human Resources
     //   - Department: Accounting
+    //   - Department: Procurement
     //   - ReferenceID: XLGR-GLOBAL-ERP-000000 (developer account)
-    const ALLOWED_DEPARTMENTS = ["Human Resources", "Accounting"];
+    const ALLOWED_DEPARTMENTS = ["Human Resources", "Accounting", "Procurement"];
     const DEVELOPER_REF_ID    = "XLGR-GLOBAL-ERP-000000";
 
     const dept  = (user.Department ?? "").trim();
